@@ -1,0 +1,174 @@
+// Load in image collection with Landsat 8 Collection 2, Level 2, Tier 1
+// Name the image collection “l8oli” 
+var marshall = ee.Geometry.Point([-105.180555, 39.9627778])
+
+// Set map options
+Map.setOptions("Terrain");
+Map.addLayer(marshall);
+Map.centerObject(marshall, 13);
+
+//Load in L8 image of Boulder Valley Pre-Marshall Fire
+function applyScaleFactors(image) {
+var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+return image.addBands(opticalBands, null, true)
+.addBands(thermalBands, null, true);
+}
+var prefire = l8oli
+.filterBounds(marshall)
+.filter(ee.Filter.calendarRange(2019, 2021, "year"))
+.filter(ee.Filter.calendarRange(5, 6, "month"))
+.map(applyScaleFactors)
+.sort("CLOUD_COVER")
+.first();
+var prefireparm = {
+bands: ["SR_B4","SR_B3","SR_B2"],
+gamma: 1.892,
+max: 0.6,
+min: 0,
+opacity: 1
+};
+print(prefire, "Least Cloudy Summer Pre Marshall Fire");
+Map.addLayer(prefire, prefireparm, "Least Cloudy Summer Pre Marshall Fire");
+
+// Convert the raw data to Top of Atmosphere (TOA) reflectance
+var imagePre = ee.Algorithms.Landsat.TOA(prefire);
+
+// Load in L8 image of Boulder Valley Post-Marshall Fire (1 year and 2 years post)
+function applyScaleFactors(image) {
+var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+return image.addBands(opticalBands, null, true)
+.addBands(thermalBands, null, true);
+}
+var postfire = l8oli
+.filterBounds(marshall)
+.filter(ee.Filter.calendarRange(2022, 2023, "year"))
+.filter(ee.Filter.calendarRange(5, 6, "month"))
+.map(applyScaleFactors)
+.sort("CLOUD_COVER")
+.first();
+var prefireparm = {
+bands: ["SR_B4","SR_B3","SR_B2"],
+gamma: 1.892,
+max: 0.6,
+min: 0,
+opacity: 1
+};
+print(postfire, "Least Cloudy Summer Post Marshall Fire");
+Map.addLayer(postfire, prefireparm, "Least Cloudy Summer Post Marshall Fire");
+
+var postfire2 = l8oli
+.filterBounds(marshall)
+.filter(ee.Filter.calendarRange(2023, 2023, "year"))
+.filter(ee.Filter.calendarRange(6, 6, "month"))
+.map(applyScaleFactors)
+.sort("CLOUD_COVER")
+.first();
+var prefireparm = {
+bands: ["SR_B4","SR_B3","SR_B2"],
+gamma: 1.892,
+max: 0.6,
+min: 0,
+opacity: 1
+};
+print(postfire2, "Least Cloudy Summer 2 Post Marshall Fire");
+Map.addLayer(postfire, prefireparm, "Least Cloudy Summer 2 Post Marshall Fire");
+
+// Create dNBR 
+var rgbVis = {
+  bands: ['SR_B4', 'SR_B3', 'SR_B2'],
+  min: 0.0,
+  max: 1.0
+};
+
+// Add to the map
+Map.addLayer(prefire, rgbVis, "Pre Burn Least Cloudy");
+Map.addLayer(postfire, rgbVis, "Post Burn Least Cloudy");
+Map.addLayer(postfire2, rgbVis, "Post Burn Least Cloudy");
+
+var nbrPre = prefire.normalizedDifference(['SR_B5', 'SR_B7']);
+var nbrPost = postfire.normalizedDifference(['SR_B5', 'SR_B7']);
+var nbrPost2 = postfire2.normalizedDifference(['SR_B5', 'SR_B7']);
+
+
+var dnbr = nbrPre.subtract(nbrPost); 
+print("Difference NBR for the Marshall, CO: ", dnbr);
+
+
+// Define Visualization Parameters for the dNBR
+var dnbrVis = {
+  min:-2,
+  max:2,
+};
+
+// Add the dNBR to the map
+Map.addLayer(dnbr, dnbrVis, "Difference NBR for the Marshall Fire");
+
+// Create mask
+var dnbr_high = dnbr.gt(0.660)
+var dnbr_mask = dnbr.updateMask(dnbr_high);//mask out everything but high severity
+
+// Add only high severity to the map
+Map.addLayer(dnbr_mask, {min:0, max:1, palette:['#f4a582', '#ca0020']}, "High Severity Burned Area");
+
+// Create NDVI layers 
+var preFire_ndvi = prefire.normalizedDifference(['SR_B5', 'SR_B4']);
+var postFire_ndvi = postfire.normalizedDifference(['SR_B5', 'SR_B4']);
+var postFire2_ndvi = postfire2.normalizedDifference(['SR_B5', 'SR_B4']);
+
+// Define NDVI Visualization Parameters
+var ndviParams = {
+  min: -1,
+  max: 1, 
+  palette: ['blue', 'white', 'green']
+};
+// Add the NDVI layers to the map
+Map.addLayer(preFire_ndvi, ndviParams, "Pre Fire NDVI");
+Map.addLayer(postFire_ndvi, ndviParams, "Post Fire NDVI");
+Map.addLayer(postFire2_ndvi, ndviParams, "Post Fire 2 NDVI");
+print("Pre Fire NDVI: ", preFire_ndvi);
+print("Post Fire NDVI: ", postFire_ndvi);
+print("Post Fire NDVI 2: ", postFire2_ndvi);
+
+// Define function
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']); 
+return image.addBands(ndvi.rename('NDVI'));
+}
+
+// Add to Map
+var l8oli_NDVI = l8oli.map(addNDVI);
+
+// Print new band names
+print("Landsat 8 OLI Bands w/NDVI: ", l8oli_NDVI.first().bandNames());
+
+// Use a 'Reducer' to get the Maximum NDVI for each pixel over the ImageCollection
+var maxNDVI = l8oli_NDVI
+.select('NDVI')
+.reduce(ee.Reducer.max());
+
+// Add the maximum NDVI to the map 
+Map.addLayer(maxNDVI, ndviParams, "Maximum NDVI");
+print("Maximum NDVI: ", maxNDVI);
+
+
+// Apply threshold
+var ndvi_gt = maxNDVI.gt(0.80); 
+
+// Add irrigated agriculture estimate to the map
+Map.addLayer(ndvi_gt, {min:0, max:1, palette: ['white', 'green']}, "Irrigated Agriculture");
+
+
+// Code for adding the fire perimeter polygon
+
+// Download the .shx, .shp, and .dbf perimeter files 
+// Add .shp file to the project 
+// Name the .shp file "marshallPerim"
+
+// Add to map
+Map.addLayer(marshallPerim);
+print("Marshall Fire Perimeter: ", marshallPerim);
+
+
+
